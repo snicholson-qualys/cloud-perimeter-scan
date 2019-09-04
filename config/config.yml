@@ -1,0 +1,7 @@
+defaults:
+  accountInfo: "./cloud-accounts.csv"
+  elbLookup: "./elb-dns.csv"
+  apiURL: "<Qualys_API_URL>"
+  exceptionTracking: "./exception-tracking.csv"
+  throttle: 5
+  cleanUp: True
