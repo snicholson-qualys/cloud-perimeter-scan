@@ -19,7 +19,7 @@ Script logic flow
 9 - (coming soon) process scan results and lookup in exceptions tracking CSV to create a CSV for each BU of their detected vulnerabilities
 10 - (coming soon) Output CSV Columns: accountId, IP, QID, Severity, CVEs, CVSS
 
-#Configure Script
+# Configure Script
 To run the script you will need:
 
 1. Credentials for the Qualys user name and password - stored in the form of environment variables
@@ -33,7 +33,7 @@ $QUALYS_API_PASSWORD
 > QUALYS_API_PASSWORD stores the base64 encoded password for Qualys API
 to encode the password using base64 encoding execute the following command substituting the API Account Password for "APIpassword" - make sure the password is in '' or ""
 
-export $QUALYS_API_PASSWORD = `echo -n "APIpassword" | base64`
+export $QUALYS_API_PASSWORD=`echo -n "APIpassword" | base64`
 
 in ./config/config.yml set the values for:
 
