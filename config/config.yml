@@ -1,7 +1,7 @@
 defaults:
   accountInfo: "./cloud-accounts.csv"
   elbLookup: "./elb-dns.csv"
-  apiURL: "<Qualys_API_URL>"
+  apiURL: "<Qualys-API-URL"
   exceptionTracking: "./exception-tracking.csv"
-  throttle: 5
-  cleanUp: True
+  concurrentScans: 5
+  csvHeaders: ["ip","dns","qid","severity","type","pci_vuln","category","port","protocol","cve_id","bugtraq_id","cvss_base"]

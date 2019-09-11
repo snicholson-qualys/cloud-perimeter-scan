@@ -11,10 +11,11 @@
 #  5 - Pull IP List from Qualys VM Host Assets and compare list of external IPs
 #  6 - Add external IPs not registered in Qualys VM Host Assets
 #  7 - run a scan by IP list
-#  8 - (coming soon) check scan status and fetch scan results when complete
-#  9 - (coming soon) process scan results and lookup in exceptions tracking CSV to create a CSV
+#  8 - check scan status and fetch scan results when complete
+#  9 - process scan results and lookup in exceptions tracking CSV to create a CSV
 #      for each BU of their detected vulnerabilities
-#  10 - (coming soon) Output CSV Columns: accountId, IP, QID, Severity, CVEs, CVSS
+#  10 - Output CSV Columns: configured in ./config/config.yml in csvHeaders: []
+#       column headers must match Qualys API reponse for call to scans endpoint
 #----------------------------------------------------------
 # Script Input parameters:
 # --scan allAccounts
@@ -22,11 +23,12 @@
 # --scan <accountId>
 #
 #----------------------------------------------------------
-# version: 1.0.0
-# date: 9.4.2019
+# version: 1.0.1
+# date: 9.10.2019
 #----------------------------------------------------------
 
-import sys, requests, os, time, csv, getopt, yaml, json, base64, socket
+import sys, requests, os, time, csv, getopt, yaml, json, base64, socket, logging
+from netaddr import *
 import xml.etree.ElementTree as ET
 import logging.config
 import argparse
@@ -54,11 +56,12 @@ def config():
         exceptionTracking = str(config_info['defaults']['exceptionTracking']).rstrip()
         elbLookup = str(config_info['defaults']['elbLookup']).rstrip()
         URL = str(config_info['defaults']['apiURL']).rstrip()
-        throttle = config_info['defaults']['throttle']
+        throttle = config_info['defaults']['concurrentScans']
+        csvHeaders = config_info['defaults']['csvHeaders']
         if URL == '':
-            print "Config information in ./config.yml not configured correctly. Exiting..."
+            logger.error("Config information in ./config.yml not configured correctly. Exiting...")
             sys.exit(1)
-    return accountInfoCSV, exceptionTracking, elbLookup, URL, throttle
+    return accountInfoCSV, exceptionTracking, elbLookup, URL, throttle, csvHeaders
 
 
 def run_connector(connectorId, URL, headers):
@@ -113,25 +116,24 @@ def hostAssetLookup(AwsAccountId, URL, b64Val):
 
     scanIpList = []
     requestBody = "<ServiceRequest>     \n<filters>\n<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING<\/Criteria>\n<Criteria field=\"accountId\" operator=\"EQUALS\">{0}<\/Criteria>\n<\/filters> \n<\/ServiceRequest>".format(str(AwsAccountId))
-    #print requestBody
+    logger.info("Host Asset request body \n {}".format(str(requestBody)))
     rURL = URL + "/qps/rest/2.0/search/am/hostasset"
-    #print rURL
+    logger.debug("Host asset URL {}".format(str(rURL)))
     rdata2 = requests.post(rURL, headers=headers, data=requestBody)
-    #print rdata2.text
+    logger.info("Request for AWS Account {0} for host assets \n {1}".format(str(AwsAccountId),str(rdata2.text)))
     jsonHostList = json.loads(rdata2.text)
-    #print rdata2.status_code
+    logger.info("Request status code for host assets for Account ID {0} - {1}".format(str(AwsAccountId), str(rdata2.status_code,)))
     assetList = jsonHostList['ServiceResponse']['data']
     for instance in assetList:
         ec2Details = instance['HostAsset']['sourceInfo']['list']
         for ec2Detail in ec2Details:
-            #print ec2Detail
+            logger.debug("EC2 Host Asset info \n {}".format(str(ec2Detail)))
             if "Ec2AssetSourceSimple" in ec2Detail:
-                #print ec2Detail['Ec2AssetSourceSimple']
+                logger.debug("EC2 Asset metadata \n {}".format(str(ec2Detail['Ec2AssetSourceSimple'])))
                 if "publicIpAddress" in ec2Detail['Ec2AssetSourceSimple']:
                     logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(ec2Detail['Ec2AssetSourceSimple']['instanceId'],ec2Detail['Ec2AssetSourceSimple']['accountId'],ec2Detail['Ec2AssetSourceSimple']['instanceState']))
                     if ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'] not in scanIpList and ec2Detail['Ec2AssetSourceSimple']['instanceState'] == "RUNNING":
                         scanIpList.append(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress']))
-                        #print "Added external IP to list: {0}".format(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress']))
                         logger.info("Added external IP to list: {0}\n".format(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'])))
 
     logger.info(str(scanIpList))
@@ -142,7 +144,6 @@ def check_ips_in_qualys(hostList, URL, headers):
     addIps = []
     username = os.environ["QUALYS_API_USERNAME"]
     password = base64.b64decode(os.environ["QUALYS_API_PASSWORD"])
-    #accountInfoCSV, exceptionTracking, URL, throttle = config()
     usrPass = str(username)+':'+str(password)
     b64Val = base64.b64encode(usrPass)
     headers = {
@@ -151,19 +152,19 @@ def check_ips_in_qualys(hostList, URL, headers):
         'Authorization': "Basic %s" % b64Val
     }
     rURL = URL + "/api/2.0/fo/asset/ip/?action=list"
-    logger.debug("Llist IPs in Qualys URL {}".format(rURL))
+    logger.debug("List IPs in Qualys URL {}".format(rURL))
     rdata = requests.get(rURL, headers=headers)
-    logger.debug("Response data from requests get for IP List".format(rdata.text))
+    logger.debug("Response data from requests get for IP List \n {}".format(str(rdata.text)))
     root = ET.fromstring(rdata.text)
     logger.debug("XML Tag {0} -- XML Text {1}".format(root[0][1][0].tag, root[0][1][0].text))
-
+    logger.debug("IP List from Qualys \n {0}".format(list(root[0][1])))
     IPinQualys = []
     for host in hostList:
         hostInQualys = False
         for ip in root[0][1]:
             #print ip.tag + " " + ip.text
             logger.debug("checking host IP {}".format(host))
-            logger.debug("Comparing {0} to {1}".format(ip.text, host))
+            logger.info("Comparing {0} to {1}".format(ip.text, host))
             if str(ip.tag) == 'IP' and str(ip.text) == str(host):
                 logger.info("Host already in Qualys Host Asset {}".format(str(host)))
                 hostInQualys = True
@@ -171,14 +172,17 @@ def check_ips_in_qualys(hostList, URL, headers):
                 break
             elif ip.tag == 'IP_RANGE':
                 rangeBegin, rangeEnd = ip.text.split('-')
-                logger.debug("Range Begin {} and Range End {}".format(rangeBegin, rangeEnd))
-                hostAddr = host.split('.')
-                if int(hostAddr[0]) >= int(rangeBegin[0]) and int(hostAddr[0]) <= int(rangeEnd[0]) and int(hostAddr[1]) >= int(rangeBegin[1]) and int(hostAddr[1]) <= int(rangeEnd[1]) and int(hostAddr[2]) >= int(rangeBegin[2]) and int(hostAddr[2]) <= int(rangeEnd[2]) and int(hostAddr[3]) >= int(rangeBegin[3]) and int(hostAddr[3]) <= int(rangeEnd[3]):
-                    logger.debug("Host exists in Qualys")
-                    logger.debug("IP Compare Works!!!")
+                logger.error("Range Begin {} and Range End {}".format(rangeBegin, rangeEnd))
+                #ipRange = IPRange(rangeBegin, rangeEnd)
+                #ipCIDR =
+                if IPAddress(host) >= IPAddress(rangeBegin) and IPAddress(host) <= IPAddress(rangeEnd):
+                    logger.error("IP in IP Range: {0} in {1}".format(str(host), str(ip.text)))
                     IPinQualys.append(str(host))
                     hostInQualys = True
                     break
+                else:
+                    logger.error("IP not in IPRange: {0} not in {1}".format(str(host), str(ip.text)))
+
 
         if host not in addIps and not hostInQualys:
             logger.debug("Host Does NOT Exist in Qualys IP Ranges")
@@ -190,11 +194,6 @@ def check_ips_in_qualys(hostList, URL, headers):
     else:
         logger.info("No IPs to add to Qualys")
         return False
-    #for child in root.iter('IP_SET'):
-    #    print child.attrib
-
-
-
 
 def addIpsToQualys(addIps, URL, headers):
     logger.debug("Made it to addIpsToQualys")
@@ -203,17 +202,35 @@ def addIpsToQualys(addIps, URL, headers):
     ips = ips.replace(" ", "")
     ips = ips.replace("\'", "")
     logger.info("add IPs to Qualys \n {}".format(ips))
+    rURL = URL + "/api/2.0/fo/asset/ip/?action=add&enable_vm=1&ips=" + str(ips)
+    logger.debug(rURL)
+    rdata = requests.post(rURL, headers=headers)
+    logger.debug(rdata.status_code)
+    logger.debug(rdata.text)
+
+'''
+#### NOT TESTED - Proof of Concept ONLY ###
+def purgeIpsFromQualys(purgeIps, URL, headers):
+    logger.debug("Made it to purgeIpsFromQualys")
+    logger.info("Purging {} from Qualys".format(str(purgeIps).encode('utf-8')))
+    ips = str(purgeIps).strip('[]')
+    ips = ips.replace(" ", "")
+    ips = ips.replace("\'", "")
+    logger.info("purge IPs from Qualys \n {}".format(ips))
     #for ip in addIps:
         #if ips:
             #ips = ips + "," + str(ip)
         #else:
             #ips = str(ip)
 
-    rURL = URL + "/api/2.0/fo/asset/ip/?action=add&enable_vm=1&ips=" + str(ips)
+    rURL = URL + "/api/2.0/fo/asset/ip/?action=purge&enable_vm=1&ips=" + str(ips)
     logger.debug(rURL)
     rdata = requests.post(rURL, headers=headers)
     logger.debug(rdata.status_code)
     logger.debug(rdata.text)
+'''
+
+
 
 
 def dnsLookup(accountId, hostList, elbLookup):
@@ -247,10 +264,124 @@ def externalPerimeterScan(ipList, accountId, optionProfileId, URL, b64Val):
     rdata = requests.post(rURL, headers=headers)
     logger.info(rdata.status_code)
     logger.info(rdata.text)
-    return 0
+    root = ET.fromstring(rdata.text)
+    logger.info(root[0][2][1][1].text)
+    return root[0][2][1][1].text
+
+def checkScanStatus(runningScansList, URL, headers):
+
+    logger.info("Made it to checking scan status")
+    logger.info("runningScanList = {}".format(runningScansList))
+    logger.debug("checking for empty list -- len(runningScansList) = {}".format(len(runningScansList)))
+    if len(runningScansList) == 0:
+        return 1, runningScansList
+    scanRunning = True
+    loopCounter = 1
+    waitInterval = len(runningScansList)
+    while scanRunning:
+        for scanRef in runningScansList:
+            logger.info("Checking first scan in list {}".format(str(scanRef)))
+            rURL = URL + "/api/2.0/fo/scan/?action=list&show_status=1&scan_ref={0}".format(str(scanRef))
+            rdata = requests.post(rURL, headers=headers)
+            rdata = requests.post(rURL, headers=headers)
+            logger.info(rdata.status_code)
+            logger.info(rdata.text)
+            root = ET.fromstring(rdata.text)
+            logger.info("Checking Scan {0} status {1}".format(scanRef, str(root[0][1][0][8][0])))
+            if str(root[0][1][0][8][0].text) == "Finished":
+                runningScansList.remove(scanRef)
+                logger.info("Running Scan list is {}".format(runningScansList))
+            logger.info("Loop Counter checking for running scans = {}".format(str(loopCounter)))
+        logger.info("runningScansList = {}".format(len(runningScansList)))
+        if len(runningScansList) == 0:
+            scanRunning = False
+        if len(runningScansList) > 0:
+            interval = int(60 * loopCounter)
+            time.sleep(interval)
+        loopCounter += 1
+        if loopCounter >= 15:
+            logger.info("Perimeter scans for are running long \n Scan Refs: {}".format(str(runningScansList).strip("[]")))
+        if loopCounter > 20:
+            logger.warning("Perimeter scans for are running long \n Scan Refs: {}".format(str(runningScansList).strip("[]")))
+            return len(runningScansList), runningScansList
+    return 1, runningScansList
+
+
+
+
+def createCsvReport(createReport, accountId, csvHeaders, URL, b64Val, exceptionTracking):
+    try:
+        logger.info("Made it to run CSV report for {}".format(str(accountId)))
+        headers = {
+            'Authorization': "Basic %s" % b64Val,
+            'X-Requested-With': 'Python Requests'
+        }
+        #if args.exceptiontracking:
+        #    with open (exceptionTracking, mode='r') as exception_csv_file:
+        #        exceptionList = csv.DictReader(exception_csv_file)
+        #    logger.info ("REad exception list \n {}".format(str(exceptionList)))
+        #    logger.info("Initiate Exceptions Processing for {}".format(str(exceptionTracking)))
+
+        for scanRef in createReport:
+            logger.debug("Processing scanRef {} results for CSV report".format(str(scanRef)))
+            out_file = "reports/" + str(accountId) + "_" "Perimeter_Report_" + time.strftime("%Y%m%d-%H%M%S") + ".csv"
+            ofile = open(out_file, "w")
+            writer = csv.DictWriter(ofile, fieldnames=csvHeaders)
+            writer.writeheader()
+            row = {}
+            rURL = URL + "/api/2.0/fo/scan/"
+            logger.info("Sending post to {}".format(str(rURL)))
+
+            params = {"action": "fetch","scan_ref":str(scanRef),"mode":"extended","output_format":"json_extended"}
+            logger.info("Fetch Scan Results Parameters = {}".format(str(params)))
+            logger.debug("Fetch scan URL is {}".format(rURL))
+            rdata = requests.post(rURL, headers=headers, params=params)
+            logger.debug("Fetch scan results response code {}".format(str(rdata.status_code)))
+            logger.debug("Type of rdata.text = {}".format(type(rdata.text)))
+            #logger.debug("Fetch scan results response body \n {}".format(str(rdata.text)))
+            counter = 0
+            scanResults = json.loads(str(rdata.text))
+            logger.debug("JSON loads list result type \n {}".format(type(scanResults)))
+            logger.debug("JSON loads list result length \n {}".format(len(scanResults)))
+            if len(scanResults) < 3:
+                logger.info("No scan findings for CSV report for Account ID {0} for scanRef {1}".format(str(accountId), str(scanRef)))
+            else:
+                for finding in scanResults:
+                    if counter > 1 and counter < (len(scanResults) - 1):
+                        #parsedData = json.loads(finding)
+                        if args.exceptiontracking:
+                            exceptionDict = {}
+                            with open (exceptionTracking, mode='r') as exception_csv_file:
+                                exceptionList = csv.DictReader(exception_csv_file)
+                                exceptionDict = exceptionList
+                                logger.info("exceptionList type = {}".format(type(exceptionList)))
+                                logger.info ("Read exception list \n {}".format(str(exceptionList)))
+                                logger.info("Initiate Exceptions Processing for {}".format(str(exceptionTracking)))
+                                for exception in exceptionList:
+                                    if accountId in exception.itervalues():
+                                        if str(finding['qid']) in exception['QID']:
+                                            logger.debug("****Exception for Account {0} and QID {1}****".format(str(accountId), str(finding['qid'])))
+                                        else:
+                                            logger.debug("No Exception for Account {0} and QID {1}".format(str(accountId), str(finding['qid'])))
+                                            for header in csvHeaders:
+                                                row[header] = finding[header]
+                                            writer.writerow(row)
+
+                        else:
+                            for header in csvHeaders:
+                                row[header] = finding[header]
+                            writer.writerow(row)
+                    counter += 1
+            ofile.close()
+        if args.exceptiontracking:
+            exception_csv_file.close()
+    except IOError as e:
+        logger.error("Encountered error in requesting scan results - error # {}".format(str(e.errno)))
+        logger.error("Encountered error in requesting scan results - error message \n {}".format(str(e.strerror)))
+
 
 def external_scan(scope):
-    accountInfoCSV, exceptionTracking, elbLookup, URL, throttle = config()
+    accountInfoCSV, exceptionTracking, elbLookup, URL, throttle, csvHeaders = config()
     username = os.environ["QUALYS_API_USERNAME"]
     password = base64.b64decode(os.environ["QUALYS_API_PASSWORD"])
     usrPass = str(username)+':'+str(password)
@@ -264,21 +395,38 @@ def external_scan(scope):
 
     with open(accountInfoCSV,mode='r') as csv_file:
         accountInfo = csv.DictReader(csv_file)
+        runningScansList = []
+        createReport = []
+        scanRefId = 'scan/1568057968.92128'
         throttleCount = 1
+        scannedAccounts = []
         if scope == "allAccounts":
             for row in accountInfo:
-                if throttleCount % throttle != 0:
-                    run_connector(row['connectorId'], URL, headers)
-                    check_connector_status(row['connectorId'], URL, b64Val)
-                    hostList = hostAssetLookup(row['accountId'], URL, b64Val)
-                    hostList = dnsLookup(row['accountId'], hostList, elbLookup)
-                    #print hostList
-                    addIps = check_ips_in_qualys(hostList, URL, headers)
-                    if addIps:
-                        addIpsToQualys(addIps, URL, headers)
-                    externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
-                    throttleCount += 1
+                run_connector(row['connectorId'], URL, headers)
+                check_connector_status(row['connectorId'], URL, b64Val)
+                hostList = hostAssetLookup(row['accountId'], URL, b64Val)
+                hostList = dnsLookup(row['accountId'], hostList, elbLookup)
+                addIps = check_ips_in_qualys(hostList, URL, headers)
+                if addIps:
+                    addIpsToQualys(addIps, URL, headers)
+                if row['accountId'] not in scannedAccounts:
+                    #scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
+                    scannedAccounts.append(row['accountId'])
+                runningScansList.append(scanRefId)
+                if args.csvreport:
+                    logger.info("Adding scan Ref to list for CSV Report {}".format(scanRefId))
+                    createReport.append(scanRefId)
+                throttleCount += 1
 
+                while throttleCount % throttle == 0:
+                    throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+                if args.csvreport:
+                    throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+                    while len(runningScansList) != 0:
+                        throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+                    createCsvReport(createReport, row['accountId'], csvHeaders, URL, b64Val, exceptionTracking)
+                #if args.purgeips:
+                #    purgeIpsFromQualys(addIps, URL, headers)
 
         else:
             for row in accountInfo:
@@ -290,32 +438,60 @@ def external_scan(scope):
                     addIps = check_ips_in_qualys(hostList, URL, headers)
                     if addIps:
                         addIpsToQualys(addIps, URL, headers)
-                    externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
-                    throttleCount += 1
+                    scanRefId = (externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val))
+                    runningScansList.append(scanRefId)
+                    if args.csvreport:
+                        logger.info("Adding scan Ref to list for CSV Report {}".format(scanRefId))
+                        createReport.append(scanRefId)
+                        throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+                        while len(runningScansList) != 0:
+                            throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+                        createCsvReport(createReport, row['accountId'], csvHeaders, URL, b64Val, exceptionTracking)
+                    #if args.purgeips:
+                    #    purgeIpsFromQualys(addIps, URL, headers)
                     break
                 elif row['BU'] == scope:
-                    if throttleCount % throttle != 0:
-                        run_connector(row['connectorId'], URL, headers)
-                        check_connector_status(row['connectorId'], URL, b64Val)
-                        hostList = hostAssetLookup(row['accountId'], URL, b64Val)
-                        hostList = dnsLookup(row['accountId'], hostList, elbLookup)
-                        #print hostList
-                        addIps = check_ips_in_qualys(hostList, URL, headers)
-                        if addIps:
-                            addIpsToQualys(addIps, URL, headers)
-                        externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
-                        throttleCount += 1
-                    else:
-                        throttleCount += 1
+                    run_connector(row['connectorId'], URL, headers)
+                    check_connector_status(row['connectorId'], URL, b64Val)
+                    hostList = hostAssetLookup(row['accountId'], URL, b64Val)
+                    hostList = dnsLookup(row['accountId'], hostList, elbLookup)
+                    logger.info("Host List - \n {}".format(hostList))
+                    addIps = check_ips_in_qualys(hostList, URL, headers)
+                    if addIps:
+                        addIpsToQualys(addIps, URL, headers)
+                    if row['accountId'] not in scannedAccounts:
+                        #scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
+                        scannedAccounts.append(row['accountId'])
+                    if scanRefId not in runningScansList:
+                        runningScansList.append(scanRefId)
+                    if args.csvreport:
+                        logger.info("Adding scan Ref to list for CSV Report {}".format(scanRefId))
+                        createReport.append(scanRefId)
+                    throttleCount += 1
+                    while throttleCount % throttle == 0:
+                        throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+                    if args.csvreport:
+                        throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+                        while len(runningScansList) != 0:
+                            throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+                        createCsvReport(createReport, row['accountId'], csvHeaders, URL, b64Val, exceptionTracking)
                         #coming soon - put in code for checking scan IDs and checking for scan status completed.
+                    #if args.purgeips:
+                    #    purgeIpsFromQualys(addIps, URL, headers)
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--scan", "-s", help="Run report for accounts in specified <scope>: \n python run-perimeter-scan.py -s <scope> or python logging.py --scan <scope> *** Acceptable scope parameters 'allAccounts', BU or accountId listed in cloud-accounts.csv")
+parser.add_argument("--scan", "-s", help="Run perimeter scan per account for accounts in specified <scope>: \n python run-perimeter-scan.py -s <scope> or python logging.py --scan <scope> *** Acceptable scope parameters 'allAccounts', BU or accountId listed in cloud-accounts.csv")
+parser.add_argument("--csvreport", "-c", help="Create a CSV report for each accounts perimeter scan", action="store_true")
+parser.add_argument("--exceptiontracking", "-e", help="Process Exception Tracking CSV for creating CSV reports for accounts, used with -c/--csvreport", action="store_true")
+#parser.add_argument("--purgeips", "-p", help="After scans complete purge cloud public IPs added to your subscription by this script", action="store_true")
 args = parser.parse_args()
 if not args.scan:
     logger.error("Scope is required to run script, please run python run-perimeter-scan.py -h for required command syntax")
     sys.exit(1)
+if args.csvreport:
+    if not os.path.exists("reports"):
+            os.makedirs("reports")
 
 if __name__ == "__main__":
     setup_logging()

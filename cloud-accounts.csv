@@ -1,2 +1,2 @@
-name,accountId,connectorId,BU,optionProfileId
-example,123456789012,123456,BUname,123456
+name,accountId,connectorId,BU,tagName,tagId,optionProfileId
+AccountName,123456789012,123456,BU_Name,Tag_Name,tagID,optionProfileID

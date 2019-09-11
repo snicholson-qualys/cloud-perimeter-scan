@@ -15,9 +15,8 @@ Script logic flow
 5 - Pull IP List from Qualys VM Host Assets and compare list of external IPs
 6 - Add external IPs not registered in Qualys VM Host Assets
 7 - run a scan by IP list
-8 - (coming soon) check scan status and fetch scan results when complete
-9 - (coming soon) process scan results and lookup in exceptions tracking CSV to create a CSV for each BU of their detected vulnerabilities
-10 - (coming soon) Output CSV Columns: accountId, IP, QID, Severity, CVEs, CVSS
+8 - check scan status and fetch scan results when complete
+9 - process scan results and lookup in exceptions tracking CSV to create a CSV Report for the detected vulnerabilities for each AWS Account
 
 # Configure Script
 To run the script you will need:
@@ -47,11 +46,15 @@ in ./config/config.yml set the values for:
 
 3. CSV file elbLookup - Requirements defined below, default value set to ./elb-dns.csv
 
-4. exceptionTracking, cleanUp, and throttle will be added soon.
+4. CSV file exceptionTracking - Requirement defined below, default value set to ./exception-tracking.csv
+
+5. concurrentScans - set to less than your Qualys concurrent scans limit
+
+6. csvHeaders - List of CSV column headers for AWS Account CSV Report. Must be list type entry ['example', 'example2']. Value MUST be congruent to the response keys list in the API response for an API call to fetch scan results.
 
 # Prerequisites
 This script is written in Python 2.7.
-The script relies on the following Python modules to execute: sys, requests, os, time, csv, getopt, logging, yaml, json, base64, logging.config, argparse, and xml.etree.ElementTree
+The script relies on the following Python modules to execute: sys, requests, os, time, csv, getopt, logging, yaml, json, base64, logging.config, argparse, xml.etree.ElementTree, and netaddr
 
 For module missing warnings/errors use PIP to install modules
 > for Linux
@@ -61,7 +64,6 @@ For module missing warnings/errors use PIP to install modules
 > for Windows
 
 `python -m pip install pyyaml`
-
 
 
 # Parameters:
@@ -94,7 +96,18 @@ For module missing warnings/errors use PIP to install modules
 
     *CSV File Requirements*
     *CSV columns* - elbDns,accountId
+    *Example Data* - example.region.elb.amazonaws.com,123456789012
     This script uses columns elbDns and accountId by column name, if these are not present in the file, the script will log errors on ELB DNS lookups
+
+
+    exceptionTracking:
+
+      File location of the exception tracking for creating CSV for each AWS Accounts CSV. This will provide the information for the for QID exceptions tracked per AWS Account.
+
+      *CSV File Requirements*
+      *CSV columns* - Description of Account,accountId,QID
+      *Example Data* - Testing Exceptions,123456789012,['123456','234567']
+      This script uses columns accountId and QID by column name, if these are not present in the file and you have specified the exception tracking in the CSV report, the script will error.
 
 
 # Running run-perimeter-scan.py
