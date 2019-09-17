@@ -172,13 +172,6 @@ def check_ips_in_qualys(hostList, URL, headers):
     logger.debug("hostList sent to check_ips_in_qualys \n {}".format(str(hostList)))
     logger.debug("URL sent to check_ips_in_qualys \n {}".format(str(URL)))
     addIps = []
-    '''
-    headers = {
-        'Accept': 'application/json',
-        'X-Requested-With' : 'python requests',
-        'Authorization': 'Basic {}'.format(str(b64Val))
-    }
-    '''
     logger.debug("Printing Headers \n {0}".format(str(headers)))
     if len(hostList) > 0:
         rURL = URL + "/api/2.0/fo/asset/ip/?action=list"
@@ -283,20 +276,14 @@ def dnsLookup(accountId, hostList, elbLookup):
 
 def externalPerimeterScan(ipList, accountId, optionProfileId, URL, b64Val):
     logger.info(ipList)
-    '''
+
     headers = {
         'Accept': '*/*',
         'content-type': 'application/json',
         'Authorization': "Basic %s" % b64Val,
         'X-Requested-With': 'Python Requests'
     }
-    '''
-    headers = {
-        'Accept': '*/*',
-        'content-type': 'application/json',
-        'Authorization': 'Basic cXVheXMybW44MzojcG5kQkJrVllKc2ZLNGg=',
-        'X-Requested-With': 'Python Requests'
-    }
+
     ipList = ipList.replace(" ", "")
     ipList = ipList.replace("\'", "")
     logger.info("Fixed ipList {}".format(ipList))
@@ -442,20 +429,13 @@ def external_scan(scope):
         'Authorization': "Basic %s" % b64Val,
         'X-Requested-With': 'Python Requests'
     }
-    '''
-    headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': 'Basic cXVheXMybW44MzojcG5kQkJrVllKc2ZLNGg=',
-        'X-Requested-With': 'Python Requests'
-    }
-    '''
+
     logger.debug("headers value being sent with requests.put/get -- {}".format(str(headers)))
     with open(accountInfoCSV,mode='r') as csv_file:
         accountInfo = csv.DictReader(csv_file)
         runningScansList = []
         createReport = {}
-        scanRefId = 'scan/1568057968.92128'
+        scanRefId = ''
         throttleCount = 1
         scannedAccounts = []
         if scope == "allAccounts":
@@ -469,7 +449,7 @@ def external_scan(scope):
                     addIpsToQualys(addIps, URL, headers)
                 if len(hostList) > 0:
                     if row['accountId'] not in scannedAccounts:
-                        #scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
+                        scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
                         scannedAccounts.append(row['accountId'])
                     runningScansList.append(scanRefId)
                     if args.csvreport:
@@ -480,13 +460,7 @@ def external_scan(scope):
                     logger.warning("Account {0} returned no targets for Perimeter Scan".format(str(row['accountId'])))
                 while throttleCount % throttle == 0:
                     throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
-                #if args.csvreport:
-                #    throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
-                #    while len(runningScansList) != 0:
-                #        throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
-                #    createCsvReport(createReport, row['accountId'], csvHeaders, URL, b64Val, exceptionTracking)
-                #if args.purgeips:
-                #    purgeIpsFromQualys(addIps, URL, headers)
+
 
         else:
             for row in accountInfo:
@@ -504,14 +478,10 @@ def external_scan(scope):
                         if args.csvreport:
                             logger.info("Adding scan Ref to list for CSV Report {}".format(scanRefId))
                             createReport[str(row['accountId'])] = str(scanRefId)
-                            #throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
-                            #while len(runningScansList) != 0:
-                            #    throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
-                            #createCsvReport(createReport, row['accountId'], csvHeaders, URL, b64Val, exceptionTracking)
+
                     else:
                         logger.warning("Account {0} returned no targets for Perimeter Scan".format(str(row['accountId'])))
-                    #if args.purgeips:
-                    #    purgeIpsFromQualys(addIps, URL, headers)
+
                     break
                 elif row['BU'] == scope:
                     run_connector(row['connectorId'], URL, headers)
@@ -524,7 +494,7 @@ def external_scan(scope):
                         addIpsToQualys(addIps, URL, headers)
                     if len(hostList) > 0:
                         if row['accountId'] not in scannedAccounts:
-                            #scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
+                            scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
                             scannedAccounts.append(row['accountId'])
                         if scanRefId not in runningScansList:
                             runningScansList.append(scanRefId)
@@ -545,9 +515,6 @@ def external_scan(scope):
                 createCsvReport(createReport, csvHeaders, URL, b64Val, exceptionTracking)
             else:
                 logger.warning("No CVS Reports to create, length of createReport k:v pairing for accountID and scanRef == 0")
-                        #coming soon - put in code for checking scan IDs and checking for scan status completed.
-                    #if args.purgeips:
-                    #    purgeIpsFromQualys(addIps, URL, headers)
 
 
 parser = argparse.ArgumentParser()
