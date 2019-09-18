@@ -25,6 +25,7 @@
 #----------------------------------------------------------
 # version: 1.0.1 - date: 9.10.2019
 # version: 1.0.2 - date: 9.17.2019 - added some retry and data validations, additional debug logging, and code performance improvements
+# version  1.0.3 - date: 9.18.2019 - fixed hostasset filter issue and removed some redundant debug logger statements.
 #----------------------------------------------------------
 
 import sys, requests, os, time, csv, getopt, yaml, json, base64, socket, logging
@@ -136,34 +137,50 @@ def hostAssetLookup(AwsAccountId, URL, b64Val):
         'X-Requested-With': 'Python Requests',
         'Accept': 'application/json',
         'Content-type': 'text/xml',
+        'Cache-Control': "no-cache",
         'Authorization': "Basic %s" % b64Val
     }
-
+    publicIpInstanceCount = 0
     scanIpList = []
-    requestBody = "<ServiceRequest>     \n<filters>\n<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING<\/Criteria>\n<Criteria field=\"accountId\" operator=\"EQUALS\">{0}<\/Criteria>\n<\/filters> \n<\/ServiceRequest>".format(str(AwsAccountId))
+    pulledAllResults = False
+    resultsIndex = 1
+    #requestBody = "<ServiceRequest>\n    <filters>\n        <Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING<\/Criteria>\n        <Criteria field=\"accountId\" operator=\"EQUALS\">{0}<\/Criteria>\n    <\/filters>\n    <preferences>\n        <limitResults>100</limitResults>\n        <startFromOffset>1</startFromOffset>\n    </preferences>\n<\/ServiceRequest>".format(str(AwsAccountId))
+    requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING</Criteria>\n\t\t<Criteria field=\"accountId\" operator=\"EQUALS\">{0}</Criteria>\n\t</filters>\n\t<preferences>\n\t\t<limitResults>100</limitResults>\n\t\t<startFromOffset>1</startFromOffset>\n\t</preferences>\n</ServiceRequest>\n".format(str(AwsAccountId))
     logger.info("Host Asset request body \n {}".format(str(requestBody)))
     rURL = URL + "/qps/rest/2.0/search/am/hostasset"
     logger.debug("Host asset URL {}".format(str(rURL)))
-    rdata2 = requests.post(rURL, headers=headers, data=requestBody)
-    logger.debug("Request for AWS Account {0} for host assets \n {1}".format(str(AwsAccountId),str(rdata2.text)))
-    jsonHostList = json.loads(rdata2.text)
-    logger.info("Request status code for host assets for Account ID {0} - {1}".format(str(AwsAccountId), str(rdata2.status_code)))
-    if int(jsonHostList['ServiceResponse']['count']) > 0 and str(jsonHostList['ServiceResponse']['responseCode']) == "SUCCESS":
-        logger.debug("Number of assets matching host asset lookup query {}".format(str(jsonHostList['ServiceResponse']['count'])))
-        assetList = jsonHostList['ServiceResponse']['data']
-        for instance in assetList:
-            ec2Details = instance['HostAsset']['sourceInfo']['list']
-            for ec2Detail in ec2Details:
-                logger.debug("EC2 Host Asset info \n {}".format(str(ec2Detail)))
-                if "Ec2AssetSourceSimple" in ec2Detail:
-                    logger.debug("EC2 Asset metadata \n {}".format(str(ec2Detail['Ec2AssetSourceSimple'])))
-                    if "publicIpAddress" in ec2Detail['Ec2AssetSourceSimple']:
-                        logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(ec2Detail['Ec2AssetSourceSimple']['instanceId'],ec2Detail['Ec2AssetSourceSimple']['accountId'],ec2Detail['Ec2AssetSourceSimple']['instanceState']))
-                        if ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'] not in scanIpList and ec2Detail['Ec2AssetSourceSimple']['instanceState'] == "RUNNING":
-                            scanIpList.append(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress']))
-                            logger.info("Added external IP to list: {0}\n".format(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'])))
-    else:
-        logger.error("Host Asset List lookup returned no results or errored \n Response \n {0}".format(str(rdata2.text)))
+    while pulledAllResults != True:
+        rdata2 = requests.post(rURL, headers=headers, data=requestBody)
+        logger.info("Request status code for host assets for Account ID {0} - {1}".format(str(AwsAccountId), str(rdata2.status_code)))
+        #logger.debug("Request for AWS Account {0} for host assets \n {1}".format(str(AwsAccountId),str(rdata2.text)))
+        jsonHostList = json.loads(rdata2.text)
+        logger.debug("**** Count of host assets returned = {0} ****".format(str(jsonHostList['ServiceResponse']['count'])))
+        if int(jsonHostList['ServiceResponse']['count']) > 0 and str(jsonHostList['ServiceResponse']['responseCode']) == "SUCCESS":
+            logger.debug("Number of assets matching host asset lookup query {}".format(str(jsonHostList['ServiceResponse']['count'])))
+            assetList = jsonHostList['ServiceResponse']['data']
+
+            for instance in assetList:
+                ec2Details = instance['HostAsset']['sourceInfo']['list']
+                for ec2Detail in ec2Details:
+                    #logger.debug("EC2 Host Asset info \n {}".format(str(ec2Detail)))
+                    if "Ec2AssetSourceSimple" in ec2Detail:
+                        #logger.debug("EC2 Asset metadata \n {}".format(str(ec2Detail['Ec2AssetSourceSimple'])))
+                        if "publicIpAddress" in ec2Detail['Ec2AssetSourceSimple']:
+                            logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(ec2Detail['Ec2AssetSourceSimple']['instanceId'],ec2Detail['Ec2AssetSourceSimple']['accountId'],ec2Detail['Ec2AssetSourceSimple']['instanceState']))
+                            publicIpInstanceCount += 1
+                            if ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'] not in scanIpList and ec2Detail['Ec2AssetSourceSimple']['instanceState'] == "RUNNING" and ec2Detail['Ec2AssetSourceSimple']['accountId'] == str(AwsAccountId):
+                                scanIpList.append(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress']))
+                                logger.info("Added external IP to list: {0}\n".format(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'])))
+            if str(jsonHostList['ServiceResponse']['hasMoreRecords']) == 'true':
+                resultsIndex+=100
+                requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING</Criteria>\n\t\t<Criteria field=\"accountId\" operator=\"EQUALS\">{0}</Criteria>\n\t</filters>\n\t<preferences>\n\t\t<limitResults>100</limitResults>\n\t\t<startFromOffset>{1}</startFromOffset>\n\t</preferences>\n</ServiceRequest>\n".format(str(AwsAccountId), str(resultsIndex))
+                logger.debug("More records to pull iterate requestBody with preferences XML -- \n\n\n {0} \n\n\n".format(str(requestBody)))
+            else:
+                logger.info("**** Public IPv4 count for AWS Account ID {0} = {1} ****".format(str(AwsAccountId),str(publicIpInstanceCount)))
+                pulledAllResults = True
+        else:
+            logger.error("Host Asset List lookup returned no results or errored \n Response \n {0}".format(str(rdata2.text)))
+    logger.info("Length of scanIpList = {}".format(len(scanIpList)))
     logger.info(str(scanIpList))
     return scanIpList
 
@@ -179,8 +196,8 @@ def check_ips_in_qualys(hostList, URL, headers):
         rdata = requests.get(rURL, headers=headers)
         logger.debug("Response data from requests get for IP List \n {}".format(str(rdata.text)))
         root = ET.fromstring(rdata.text)
-        logger.debug("XML Tag {0} -- XML Text {1}".format(root[0][1][0].tag, root[0][1][0].text))
-        logger.debug("IP List from Qualys \n {0}".format(list(root[0][1])))
+        #logger.debug("XML Tag {0} -- XML Text {1}".format(root[0][1][0].tag, root[0][1][0].text))
+        #logger.debug("IP List from Qualys \n {0}".format(list(root[0][1])))
         IPinQualys = []
         for host in hostList:
             hostInQualys = False
@@ -195,16 +212,14 @@ def check_ips_in_qualys(hostList, URL, headers):
                     break
                 elif ip.tag == 'IP_RANGE':
                     rangeBegin, rangeEnd = ip.text.split('-')
-                    logger.error("Range Begin {} and Range End {}".format(rangeBegin, rangeEnd))
-                    #ipRange = IPRange(rangeBegin, rangeEnd)
-                    #ipCIDR =
+                    logger.info("Range Begin {} and Range End {}".format(rangeBegin, rangeEnd))
                     if IPAddress(host) >= IPAddress(rangeBegin) and IPAddress(host) <= IPAddress(rangeEnd):
-                        logger.error("IP in IP Range: {0} in {1}".format(str(host), str(ip.text)))
+                        logger.info("IP in IP Range: {0} in {1}".format(str(host), str(ip.text)))
                         IPinQualys.append(str(host))
                         hostInQualys = True
                         break
                     else:
-                        logger.error("IP not in IPRange: {0} not in {1}".format(str(host), str(ip.text)))
+                        logger.info("IP not in IPRange: {0} not in {1}".format(str(host), str(ip.text)))
 
 
             if host not in addIps and not hostInQualys:
@@ -315,7 +330,7 @@ def checkScanStatus(runningScansList, URL, headers):
             logger.info(rdata.status_code)
             logger.info(rdata.text)
             root = ET.fromstring(rdata.text)
-            logger.info("Checking Scan {0} status {1}".format(scanRef, str(root[0][1][0][8][0])))
+            logger.info("Checking Scan {0} status {1}".format(scanRef, str(root[0][1][0][8][0].text)))
             if str(root[0][1][0][8][0].text) == "Finished":
                 runningScansList.remove(scanRef)
                 logger.info("Running Scan list is {}".format(runningScansList))
@@ -344,11 +359,6 @@ def createCsvReport(createReport, csvHeaders, URL, b64Val, exceptionTracking):
             'Authorization': "Basic %s" % b64Val,
             'X-Requested-With': 'Python Requests'
         }
-        #if args.exceptiontracking:
-        #    with open (exceptionTracking, mode='r') as exception_csv_file:
-        #        exceptionList = csv.DictReader(exception_csv_file)
-        #    logger.info ("REad exception list \n {}".format(str(exceptionList)))
-        #    logger.info("Initiate Exceptions Processing for {}".format(str(exceptionTracking)))
 
         for accountId, scanRef in createReport.items():
             logger.debug("Account {0} - Processing scanRef {1} results for CSV report".format(str(accountId), str(scanRef)))
@@ -440,6 +450,7 @@ def external_scan(scope):
         scannedAccounts = []
         if scope == "allAccounts":
             for row in accountInfo:
+                hostList = []
                 run_connector(row['connectorId'], URL, headers)
                 check_connector_status(row['connectorId'], URL, b64Val)
                 hostList = hostAssetLookup(row['accountId'], URL, b64Val)
@@ -464,6 +475,7 @@ def external_scan(scope):
 
         else:
             for row in accountInfo:
+                hostList = []
                 if row['accountId'] == scope:
                     run_connector(row['connectorId'], URL, headers)
                     check_connector_status(row['connectorId'], URL, b64Val)
@@ -521,7 +533,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--scan", "-s", help="Run perimeter scan per account for accounts in specified <scope>: \n python run-perimeter-scan.py -s <scope> or python logging.py --scan <scope> *** Acceptable scope parameters 'allAccounts', BU or accountId listed in cloud-accounts.csv")
 parser.add_argument("--csvreport", "-c", help="Create a CSV report for each accounts perimeter scan", action="store_true")
 parser.add_argument("--exceptiontracking", "-e", help="Process Exception Tracking CSV for creating CSV reports for accounts, used with -c/--csvreport", action="store_true")
-#parser.add_argument("--purgeips", "-p", help="After scans complete purge cloud public IPs added to your subscription by this script", action="store_true")
 args = parser.parse_args()
 if not args.scan:
     logger.error("Scope is required to run script, please run python run-perimeter-scan.py -h for required command syntax")
