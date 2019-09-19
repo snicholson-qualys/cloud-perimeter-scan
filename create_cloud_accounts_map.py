@@ -12,6 +12,9 @@
 #      row['name'] = connector['name']
 #      row['accountId'] = connector['awsAccountId']
 #      row['optionProfileId'] = str(args.optionprofile)
+#      row['BU']=''  <-- ### user can add code to lookup or hard code this value
+#      row['tagName']='' <-- ### user can add code to lookup or hard code this value
+#      row['tagId']='' <-- ### user can add code to lookup or hard code this value
 #  4 - file name set on line 59 -->  out_file = "cloud-accounts2.csv"
 #----------------------------------------------------------
 # Script Input parameters:
@@ -44,10 +47,9 @@ def setup_logging(default_path='./config/logging.yml',default_level=logging.INFO
 
 
 
-def query_connector_list(URL, headers):
+def query_connector_list(accountInfo, URL, headers):
     try:
         rURL = URL + "/qps/rest/2.0/run/am/assetdataconnector/"
-        #requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"activation\" operator=\"IN\">VM</Criteria>\n\t\t<Criteria field=\"disabled\" operator=\"EQUALS\">false</Criteria>\n\t\t<Criteria field=\"type\" operator=\"EQUALS\">AWS</Criteria>\n\t</filters>\n</ServiceRequest>"
         requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"activation\" operator=\"IN\">VM</Criteria>\n\t\t<Criteria field=\"disabled\" operator=\"EQUALS\">false</Criteria>\n\t\t<Criteria field=\"type\" operator=\"EQUALS\">AWS</Criteria>\n\t</filters>\n</ServiceRequest>\n"
         rdata = requests.post(rURL, headers=headers, data=requestBody)
         row = {}
@@ -57,7 +59,7 @@ def query_connector_list(URL, headers):
         if str(runResult['ServiceResponse']['responseCode']) != "SUCCESS" or str(runResult['ServiceResponse']['responseCode']) == "NOT_FOUND":
             logger.error("Repsonse Error - API Response Message: {0}".format(str(rdata.text)))
         elif int(runResult['ServiceResponse']['count']) > 0:
-            out_file = "cloud-accounts2.csv"
+            out_file = accountInfo
             ofile = open(out_file, "w")
             fieldnames = ['name','accountId','connectorId','BU','tagName','tagId','optionProfileId']
             writer = csv.DictWriter(ofile, fieldnames=fieldnames)
@@ -82,6 +84,7 @@ def build_cloud_account_map():
     with open('./config/config.yml', 'r') as config_settings:
         config_info = yaml.load(config_settings)
         URL = str(config_info['defaults']['apiURL']).rstrip()
+        accountInfo = str(config_info['defaults']['accountInfo']).rstrip()
         if URL == '':
             logger.error("Config information in ./config.yml not configured correctly. Exiting...")
             sys.exit(1)
@@ -98,7 +101,7 @@ def build_cloud_account_map():
         'X-Requested-With': 'Python Requests'
     }
 
-    query_connector_list(URL, headers)
+    query_connector_list(accountInfo, URL, headers)
 
 
 
