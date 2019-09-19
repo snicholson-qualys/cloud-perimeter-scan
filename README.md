@@ -32,10 +32,8 @@ $QUALYS_API_PASSWORD
 > QUALYS_API_PASSWORD stores the base64 encoded password for Qualys API
 to encode the password using base64 encoding execute the following command substituting the API Account Password for "APIpassword" - make sure the password is in '' or ""
 
-export $QUALYS_API_PASSWORD = \`echo -n "APIpassword" | base64\`
-=======
-export $QUALYS_API_PASSWORD=`echo -n "APIpassword" | base64`
->>>>>>> e4a85f169c1a42bfcad592a2869de311905d753b
+export $QUALYS_API_PASSWORD=\`echo -n "APIpassword" | base64\`
+
 
 in ./config/config.yml set the values for:
 
