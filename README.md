@@ -96,6 +96,19 @@ For module missing warnings/errors use PIP to install modules
     *Example Data* - example.region.elb.amazonaws.com,123456789012
     This script uses columns elbDns and accountId by column name, if these are not present in the file, the script will log errors on ELB DNS lookups
 
+  cloud-accounts.csv helper file:
+
+    A helper file is provided for creating the ./cloud-accounts.csv file from the Qualys AssetView Connectors list for all connectors
+    that have
+
+    1. Activation for VM module
+    2. disabled=false
+    3. type=AWS
+
+    This helper file will not provide BU, tagId, or tagName fields. The helper file can be modified to populate this values as needed.
+    helper file provides the data for name, accountId, and connectorId from the Qualys AssetView Connector list and takes one input
+    "--optionprofile 123456"
+    To run the helper file run: python create_cloudAccounts_map.py --optionprofile 123456
 
   exceptionTracking:
 
