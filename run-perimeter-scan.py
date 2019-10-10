@@ -26,6 +26,7 @@
 # version: 1.0.1 - date: 9.10.2019
 # version: 1.0.2 - date: 9.17.2019 - added some retry and data validations, additional debug logging, and code performance improvements
 # version  1.0.3 - date: 9.18.2019 - fixed hostasset filter issue and removed some redundant debug logger statements.
+# version  1.0.4 - date: 10.10.2019 - fixed check_ips_in_qualys from passing the wrong headers, and added pagination for assets and IPs
 #----------------------------------------------------------
 
 import sys, requests, os, time, csv, getopt, yaml, json, base64, socket, logging
@@ -59,10 +60,11 @@ def config():
         URL = str(config_info['defaults']['apiURL']).rstrip()
         throttle = config_info['defaults']['concurrentScans']
         csvHeaders = config_info['defaults']['csvHeaders']
+        pageSize = config_info['defaults']['pageSize']
         if URL == '':
             logger.error("Config information in ./config.yml not configured correctly. Exiting...")
             sys.exit(1)
-    return accountInfoCSV, exceptionTracking, elbLookup, URL, throttle, csvHeaders
+    return accountInfoCSV, exceptionTracking, elbLookup, URL, throttle, csvHeaders, pageSize
 
 
 def run_connector(connectorId, URL, headers):
@@ -131,7 +133,7 @@ def check_connector_status(connectorId, URL, b64Val):
 
 
 
-def hostAssetLookup(AwsAccountId, URL, b64Val):
+def hostAssetLookup(AwsAccountId, URL, b64Val, pageSize):
     logger.info("Made it to hostAssetLookup")
     headers = {
         'X-Requested-With': 'Python Requests',
@@ -145,7 +147,7 @@ def hostAssetLookup(AwsAccountId, URL, b64Val):
     pulledAllResults = False
     resultsIndex = 1
     #requestBody = "<ServiceRequest>\n    <filters>\n        <Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING<\/Criteria>\n        <Criteria field=\"accountId\" operator=\"EQUALS\">{0}<\/Criteria>\n    <\/filters>\n    <preferences>\n        <limitResults>100</limitResults>\n        <startFromOffset>1</startFromOffset>\n    </preferences>\n<\/ServiceRequest>".format(str(AwsAccountId))
-    requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING</Criteria>\n\t\t<Criteria field=\"accountId\" operator=\"EQUALS\">{0}</Criteria>\n\t</filters>\n\t<preferences>\n\t\t<limitResults>100</limitResults>\n\t\t<startFromOffset>1</startFromOffset>\n\t</preferences>\n</ServiceRequest>\n".format(str(AwsAccountId))
+    requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING</Criteria>\n\t\t<Criteria field=\"accountId\" operator=\"EQUALS\">{0}</Criteria>\n\t</filters>\n\t<preferences>\n\t\t<limitResults>{1}</limitResults>\n\t\t<startFromOffset>1</startFromOffset>\n\t</preferences>\n</ServiceRequest>\n".format(str(AwsAccountId),str(pageSize))
     logger.info("Host Asset request body \n {}".format(str(requestBody)))
     rURL = URL + "/qps/rest/2.0/search/am/hostasset"
     logger.debug("Host asset URL {}".format(str(rURL)))
@@ -173,7 +175,7 @@ def hostAssetLookup(AwsAccountId, URL, b64Val):
                                 logger.info("Added external IP to list: {0}\n".format(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'])))
             if str(jsonHostList['ServiceResponse']['hasMoreRecords']) == 'true':
                 resultsIndex+=100
-                requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING</Criteria>\n\t\t<Criteria field=\"accountId\" operator=\"EQUALS\">{0}</Criteria>\n\t</filters>\n\t<preferences>\n\t\t<limitResults>100</limitResults>\n\t\t<startFromOffset>{1}</startFromOffset>\n\t</preferences>\n</ServiceRequest>\n".format(str(AwsAccountId), str(resultsIndex))
+                requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING</Criteria>\n\t\t<Criteria field=\"accountId\" operator=\"EQUALS\">{0}</Criteria>\n\t</filters>\n\t<preferences>\n\t\t<limitResults>{1}</limitResults>\n\t\t<startFromOffset>{2}</startFromOffset>\n\t</preferences>\n</ServiceRequest>\n".format(str(AwsAccountId), str(pageSize), str(resultsIndex))
                 logger.debug("More records to pull iterate requestBody with preferences XML -- \n\n\n {0} \n\n\n".format(str(requestBody)))
             else:
                 logger.info("**** Public IPv4 count for AWS Account ID {0} = {1} ****".format(str(AwsAccountId),str(publicIpInstanceCount)))
@@ -426,7 +428,7 @@ def createCsvReport(createReport, csvHeaders, URL, b64Val, exceptionTracking):
 
 
 def external_scan(scope):
-    accountInfoCSV, exceptionTracking, elbLookup, URL, throttle, csvHeaders = config()
+    accountInfoCSV, exceptionTracking, elbLookup, URL, throttle, csvHeaders, pageSize = config()
     username = os.environ["QUALYS_API_USERNAME"]
     password = base64.b64decode(os.environ["QUALYS_API_PASSWORD"])
     logger.debug("Base64 password {0} and Base64decode: {1}".format(str(os.environ["QUALYS_API_PASSWORD"]), str(password)))
@@ -453,9 +455,9 @@ def external_scan(scope):
                 hostList = []
                 run_connector(row['connectorId'], URL, headers)
                 check_connector_status(row['connectorId'], URL, b64Val)
-                hostList = hostAssetLookup(row['accountId'], URL, b64Val)
+                hostList = hostAssetLookup(row['accountId'], URL, b64Val, pageSize)
                 hostList = dnsLookup(row['accountId'], hostList, elbLookup)
-                addIps = check_ips_in_qualys(hostList, URL, b64Val)
+                addIps = check_ips_in_qualys(hostList, URL, headers)
                 if addIps:
                     addIpsToQualys(addIps, URL, headers)
                 if len(hostList) > 0:
@@ -479,9 +481,9 @@ def external_scan(scope):
                 if row['accountId'] == scope:
                     run_connector(row['connectorId'], URL, headers)
                     check_connector_status(row['connectorId'], URL, b64Val)
-                    hostList = hostAssetLookup(row['accountId'], URL, b64Val)
+                    hostList = hostAssetLookup(row['accountId'], URL, b64Val, pageSize)
                     hostList = dnsLookup(row['accountId'], hostList, elbLookup)
-                    addIps = check_ips_in_qualys(hostList, URL, b64Val)
+                    addIps = check_ips_in_qualys(hostList, URL, headers)
                     if addIps:
                         addIpsToQualys(addIps, URL, headers)
                     if len(hostList) > 0:
@@ -498,7 +500,7 @@ def external_scan(scope):
                 elif row['BU'] == scope:
                     run_connector(row['connectorId'], URL, headers)
                     check_connector_status(row['connectorId'], URL, b64Val)
-                    hostList = hostAssetLookup(row['accountId'], URL, b64Val)
+                    hostList = hostAssetLookup(row['accountId'], URL, b64Val, pageSize)
                     hostList = dnsLookup(row['accountId'], hostList, elbLookup)
                     logger.info("Host List - \n {}".format(hostList))
                     addIps = check_ips_in_qualys(hostList, URL, headers)
