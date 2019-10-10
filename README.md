@@ -100,14 +100,14 @@ For module missing warnings/errors use PIP to install modules
     This script uses columns elbDns and accountId by column name, if these are not present in the file, the script will log errors on ELB DNS lookups
 
 
-    exceptionTracking:
+  exceptionTracking:
 
-      File location of the exception tracking for creating CSV for each AWS Accounts CSV. This will provide the information for the for QID exceptions tracked per AWS Account.
+    File location of the exception tracking for creating CSV for each AWS Accounts CSV. This will provide the information for the for QID exceptions tracked per AWS Account.
 
-      *CSV File Requirements*
-      *CSV columns* - Description of Account,accountId,QID
-      *Example Data* - Testing Exceptions,123456789012,['123456','234567']
-      This script uses columns accountId and QID by column name, if these are not present in the file and you have specified the exception tracking in the CSV report, the script will error.
+    *CSV File Requirements*
+    *CSV columns* - Description of Account,accountId,QID
+    *Example Data* - Testing Exceptions,123456789012,['123456','234567']
+    This script uses columns accountId and QID by column name, if these are not present in the file and you have specified the exception tracking in the CSV report, the script will error.
 
 
 # Running run-perimeter-scan.py
