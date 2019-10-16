@@ -1,2 +1,3 @@
-name,accountId,connectorId,BU,tagName,tagId,optionProfileId
-AccountName,123456789012,123456,BU_Name,Tag_Name,tagID,optionProfileID
+name,accountId,connectorId,BU,tagName,tagId,optionProfileId,provider
+AWS account1,123456789012,123456,BU,exampleTag,1234567,1234567,aws
+Azure Account 1,subUUID,123456,BU,exampleTag,1234567,1234567,azure
