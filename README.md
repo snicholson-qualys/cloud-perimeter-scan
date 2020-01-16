@@ -1,5 +1,5 @@
 # cloud-perimeter-scan
-
+version 1.1.0
 
 # License
 THIS SCRIPT IS PROVIDED TO YOU "AS IS."  TO THE EXTENT PERMITTED BY LAW, QUALYS HEREBY DISCLAIMS ALL WARRANTIES AND LIABILITY FOR THE PROVISION OR USE OF THIS SCRIPT.  IN NO EVENT SHALL THESE SCRIPTS BE DEEMED TO BE CLOUD SERVICES AS PROVIDED BY QUALYS
@@ -7,7 +7,7 @@ THIS SCRIPT IS PROVIDED TO YOU "AS IS."  TO THE EXTENT PERMITTED BY LAW, QUALYS 
 # Summary
 Python script for running AWS Cloud Perimeter Scan via Qualys API. Script will process a CSV of AWS Accounts and then iterate that CSV for the specified scope.
 
-Script logic flow
+Script scanFromFile logic flow
 1 - process a CSV of account info (CSV columns name, accountId, connectorID, BU, optionProfileId).
 2 - run the associated connectors for the defined scope
 3 - Check for completion of the connector run
@@ -16,7 +16,36 @@ Script logic flow
 6 - Add external IPs not registered in Qualys VM Host Assets
 7 - run a scan by IP list
 8 - check scan status and fetch scan results when complete
-9 - process scan results and lookup in exceptions tracking CSV to create a CSV Report for the detected vulnerabilities for each AWS Account
+9 - If csvreport option used, process scan results (lookup in exceptions tracking CSV if --exception options used) to create a CSV Report for the detected vulnerabilities for each AWS Account
+
+Script command line parameter logic flow
+1 - run the specified connectorId
+3 - Check for completion of the connector run
+4 - Pull list of host assets and (internal or external) IPs
+5 - Pull IP List from Qualys VM Host Assets and compare list of IPs
+6 - Add IPs not registered in Qualys VM Host Assets
+7 - run a scan by IP list
+8 - check scan status and fetch scan results when complete
+9 - If csvreport option used, process scan results (lookup in exceptions tracking CSV if --exception option used) to create a CSV Report for the detected vulnerabilities for specified AWS Account
+
+# Worflow examples
+1. Process a CSV file listed in .config/config.yml with list of accounts/subscriptions/projects which contains the accounts/subscriptions/projects, connectorID's, optionProfileId's, tagId's to perform an external perimeter non-authenticated VM scan. Any IP that is not activated in the VM application should be activated. Create a CSV report for each account with exceptions listed in an exceptions.csv file
+> python run-perimeter-scan.py -sff -s allAccounts -e -c -a
+
+2. Process a CSV file listed in .config/config.yml with list of accounts/subscriptions/projects which contains the accounts/subscriptions/projects, connectorID's, optionProfileId's, tagId's to perform an external perimeter non-authenticated VM scan. Any IP that is not activated in the VM application should be excluded from the scan scope. Create a CSV report for each account with exceptions listed in an exceptions.csv file
+> python run-perimeter-scan.py -sff -s allAccounts -e -c
+
+3. Process a CSV file listed in .config/config.yml with list of accounts/subscriptions/projects which contains the accounts/subscriptions/projects, connectorID's, optionProfileId's, tagId's to perform an external perimeter non-authenticated VM scan. Any IP that is not activated in the VM application should be activated. Create a CSV report for each account
+> python run-perimeter-scan.py -sff -s allAccounts -c -a
+
+4. Process a CSV file listed in .config/config.yml with list of accounts/subscriptions/projects which contains the accounts/subscriptions/projects, connectorID's, optionProfileId's, tagId's to perform an internal VM scan. Any IP that is not activated in the VM module should be activated. Create a CSV report for each account with exceptions listed in an exceptions.csv file
+> python run-perimeter-scan.py -sff -s allAccounts -e -c -a -i -sn Example-Qualys-Scanner_name
+
+5. Create a internal private IP address target scan job for an Azure Account, with specified optionProfileId and tagId scope. Activate all asset IPs within scope that not already activated in the VM module
+> python run-perimeter-scan.py -a -i -sn Example-Qualys-Scanner_name -ci 123456 -ai d9cce66b-0407-4fd2-a3e6-7421e54bc156 -ti 12345678
+
+6. Create a internal private IP address target scan job for an Azure Account, with specified optionProfileId and tagId scope. Activate all asset IPs within scope that not already activated in the VM module. Create a CSV report of scan results.
+> python run-perimeter-scan.py -a -i -sn Example-Qualys-Scanner_name -ci 123456 -ai d9cce66b-0407-4fd2-a3e6-7421e54bc156 -ti 12345678 -c
 
 # Configure Script
 To run the script you will need:
@@ -64,7 +93,7 @@ For module missing warnings/errors use PIP to install modules
 
 
 # Parameters:
-
+>./config/config.yml
   apiURL:
 
     Default: Qualys API URL for API endpoint. See https://www.qualys.com/docs/qualys-api-vmpc-user-guide.pdf page 8    
@@ -128,13 +157,54 @@ or
 
     > python run-perimeter-scan.py --scan <scope>
 
-scope - accepts one of three input types
+Command line Parameters:
 
-allAccount (case sensitive) - run perimeter scan for each account listed in cloud_accounts.csv
+usage: run-perimeter-scan.py [-h] [--scan SCAN] [--scanFromFile] [--csvreport]
+                             [--exceptiontracking] [--tagScanAws]
+                             [--activateAssets] [--internal]
+                             [--scannerName SCANNERNAME] [--tagId TAGID]
+                             [--provider PROVIDER] [--accountId ACCOUNTID]
+                             [--connectorId CONNECTORID]
+                             [--optionProfileId OPTIONPROFILEID]
 
-BU - run perimeter scan for each account listed for the specified Business Unit defined in cloud_accounts.csv
+                             optional arguments:
+                               -h, --help            show this help message and exit
+                               --scan SCAN, -s SCAN  Run perimeter scan per account for accounts in
+                                                     specified <scope>: python run-perimeter-scan.py -s
+                                                     <scope> or python logging.py --scan <scope> ***
+                                                     Acceptable scope parameters 'allAccounts', BU or
+                                                     accountId listed in cloud-accounts.csv
+                               --scanFromFile, -sff  Scan from list of cloud accounts listed in file
+                               --csvreport, -c       Create a CSV report for each accounts perimeter scan
+                               --exceptiontracking, -e
+                                                     Process Exception Tracking CSV for creating CSV
+                                                     reports for accounts, used with -c/--csvreport
+                               --tagScanAws, -t      Process AWS Perimeter Assets with specified Qualys Tag
+                                                     ID
+                               --activateAssets, -a  Activate all IPs in scope of accounts in Qualys Vuln
+                                                     Mgmt Module
+                               --internal, -i        Scan Internal IP with designated scannerName
+                               --scannerName SCANNERNAME, -sn SCANNERNAME
+                                                     ScannerName for Internal/Private IP scans of AWS/aws,
+                                                     AZURE/azure, or GCP/gcp workloads
+                               --tagId TAGID, -ti TAGID
+                                                     **Required if not using --scanFromFile/-sff** Tag ID
+                                                     for command line parameter
+                               --provider PROVIDER, -p PROVIDER
+                                                     **Required if not using --scanFromFile/-sff** Specifiy
+                                                     cloud provider AWS, Azure, or GCP for command line
+                                                     parameter
+                               --accountId ACCOUNTID, -ai ACCOUNTID
+                                                     **Required if not using --scanFromFile/-sff** Specify
+                                                     AWS Account ID, Azure Subscription UUID, or GCP
+                                                     Project ID for command line parameter
+                               --connectorId CONNECTORID, -ci CONNECTORID
+                                                     **Required if not using --scanFromFile/-sff** Specify
+                                                     Qualys Connector ID for command line parameter
+                               --optionProfileId OPTIONPROFILEID, -o OPTIONPROFILEID
+                                                     **Required if not using --scanFromFile/-sff** Specify
+                                                     Qualys Option Profile ID for command line parameter
 
-accountId - run perimeter scan for the account ID specified in cloud_accounts.csv
 
 
 # Logging

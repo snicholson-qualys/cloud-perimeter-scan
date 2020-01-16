@@ -1,0 +1,2 @@
+export QUALYS_API_PASSWORD=`echo -n "Qualys_API_Password" | base64`
+export QUALYS_API_USERNAME=QUALYS_API_USERNAME
