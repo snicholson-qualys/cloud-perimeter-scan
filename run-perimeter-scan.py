@@ -28,6 +28,8 @@
 # version  1.0.3 - date: 9.18.2019 - fixed hostasset filter issue and removed some redundant debug logger statements.
 # version  1.0.4 - date: 10.10.2019 - fixed check_ips_in_qualys from passing the wrong headers, and added pagination for assets and IPs
 # version  1.0.5 - date: 10.11.2019 - Add Azure and GCP perimeter scan functionality based on Qualys tagID for cloud asset search publicIpAddress:*
+# version  1.1.0 - date: 01.16.2020 - Added command line run of script with single scan command line Parameters
+#                                     Added functionality for internal scan using private IP Addresses with specififed Qualys scanner
 #----------------------------------------------------------
 
 import sys, requests, os, time, csv, getopt, yaml, json, base64, socket, logging
@@ -144,6 +146,7 @@ def hostAssetLookup(AwsAccountId, URL, b64Val, pageSize):
         'Authorization': "Basic %s" % b64Val
     }
     publicIpInstanceCount = 0
+    privateIpInstanceCount = 0
     scanIpList = []
     pulledAllResults = False
     resultsIndex = 1
@@ -168,18 +171,30 @@ def hostAssetLookup(AwsAccountId, URL, b64Val, pageSize):
                     #logger.debug("EC2 Host Asset info \n {}".format(str(ec2Detail)))
                     if "Ec2AssetSourceSimple" in ec2Detail:
                         #logger.debug("EC2 Asset metadata \n {}".format(str(ec2Detail['Ec2AssetSourceSimple'])))
-                        if "publicIpAddress" in ec2Detail['Ec2AssetSourceSimple']:
-                            logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(ec2Detail['Ec2AssetSourceSimple']['instanceId'],ec2Detail['Ec2AssetSourceSimple']['accountId'],ec2Detail['Ec2AssetSourceSimple']['instanceState']))
-                            publicIpInstanceCount += 1
-                            if ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'] not in scanIpList and ec2Detail['Ec2AssetSourceSimple']['instanceState'] == "RUNNING" and ec2Detail['Ec2AssetSourceSimple']['accountId'] == str(AwsAccountId):
-                                scanIpList.append(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress']))
-                                logger.info("Added external IP to list: {0}\n".format(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'])))
+                        if args.internal:
+                            if "privateIpAddress" in ec2Detail['Ec2AssetSourceSimple']:
+                                logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(ec2Detail['Ec2AssetSourceSimple']['instanceId'],ec2Detail['Ec2AssetSourceSimple']['accountId'],ec2Detail['Ec2AssetSourceSimple']['instanceState']))
+                                privateIpInstanceCount += 1
+                                if ec2Detail['Ec2AssetSourceSimple']['privateIpAddress'] not in scanIpList and ec2Detail['Ec2AssetSourceSimple']['instanceState'] == "RUNNING" and ec2Detail['Ec2AssetSourceSimple']['accountId'] == str(AwsAccountId):
+                                    scanIpList.append(str(ec2Detail['Ec2AssetSourceSimple']['privateIpAddress']))
+                                    logger.info("Added internal IP to list: {0}\n".format(str(ec2Detail['Ec2AssetSourceSimple']['privateIpAddress'])))
+
+                        else:
+                            if "publicIpAddress" in ec2Detail['Ec2AssetSourceSimple']:
+                                logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(ec2Detail['Ec2AssetSourceSimple']['instanceId'],ec2Detail['Ec2AssetSourceSimple']['accountId'],ec2Detail['Ec2AssetSourceSimple']['instanceState']))
+                                publicIpInstanceCount += 1
+                                if ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'] not in scanIpList and ec2Detail['Ec2AssetSourceSimple']['instanceState'] == "RUNNING" and ec2Detail['Ec2AssetSourceSimple']['accountId'] == str(AwsAccountId):
+                                    scanIpList.append(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress']))
+                                    logger.info("Added external IP to list: {0}\n".format(str(ec2Detail['Ec2AssetSourceSimple']['publicIpAddress'])))
             if str(jsonHostList['ServiceResponse']['hasMoreRecords']) == 'true':
                 resultsIndex+=100
                 requestBody = "<ServiceRequest>\n\t<filters>\n\t\t<Criteria field=\"instanceState\" operator=\"EQUALS\">RUNNING</Criteria>\n\t\t<Criteria field=\"accountId\" operator=\"EQUALS\">{0}</Criteria>\n\t</filters>\n\t<preferences>\n\t\t<limitResults>{1}</limitResults>\n\t\t<startFromOffset>{2}</startFromOffset>\n\t</preferences>\n</ServiceRequest>\n".format(str(AwsAccountId), str(pageSize), str(resultsIndex))
                 logger.debug("More records to pull iterate requestBody with preferences XML -- \n\n\n {0} \n\n\n".format(str(requestBody)))
             else:
-                logger.info("**** Public IPv4 count for AWS Account ID {0} = {1} ****".format(str(AwsAccountId),str(publicIpInstanceCount)))
+                if args.internal:
+                    logger.info("**** Private IPv4 count for AWS Account ID {0} = {1} ****".format(str(AwsAccountId),str(privateIpInstanceCount)))
+                else:
+                    logger.info("**** Public IPv4 count for AWS Account ID {0} = {1} ****".format(str(AwsAccountId),str(publicIpInstanceCount)))
                 pulledAllResults = True
         else:
             logger.error("Host Asset List lookup returned no results or errored \n Response \n {0}".format(str(rdata2.text)))
@@ -235,18 +250,32 @@ def hostTaggedAssetLookup(AccountId, tagId, provider, URL, b64Val, pageSize):
                     #logger.debug("EC2 Host Asset info \n {}".format(str(ec2Detail)))
                     if metadataSearch in instanceDetail:
                         #logger.debug("EC2 Asset metadata \n {}".format(str(ec2Detail['Ec2AssetSourceSimple'])))
-                        if "publicIpAddress" in instanceDetail[str(metadataSearch)]:
-                            logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(instanceDetail[str(metadataSearch)][str(instanceId)],instanceDetail[str(metadataSearch)][accountId],instanceDetail[str(metadataSearch)]['state']))
-                            publicIpInstanceCount += 1
-                            if instanceDetail[str(metadataSearch)]['publicIpAddress'] not in scanIpList and instanceDetail[str(metadataSearch)]['state'] == "RUNNING" and instanceDetail[str(metadataSearch)][str(accountId)] == str(AccountId):
-                                if args.activateAssets:
-                                    scanIpList.append(str(instanceDetail[str(metadataSearch)]['publicIpAddress']))
-                                    logger.info("Added external IP to list: {0}\n".format(str(instanceDetail[str(metadataSearch)]['publicIpAddress'])))
-                                elif str(instance['HostAsset']['trackingMethod']) == "QAGENT" and "VM" in str(instance['HostAsset']['agentInfo']['activatedModule']):
-                                    scanIpList.append(str(instanceDetail[str(metadataSearch)]['publicIpAddress']))
-                                    logger.info("Added external IP to list: {0}\n".format(str(instanceDetail[str(metadataSearch)]['publicIpAddress'])))
-                                else:
-                                    logger.warning("IP Address {0} for Instance ID {1} not activated in VM".format(str(instanceDetail[str(metadataSearch)]['publicIpAddress']),str(instanceDetail[str(metadataSearch)][str(instanceId)])))
+                        if args.internal == True:
+                            if "privateIpAddress" in instanceDetail[str(metadataSearch)]:
+                                logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(instanceDetail[str(metadataSearch)][str(instanceId)],instanceDetail[str(metadataSearch)][accountId],instanceDetail[str(metadataSearch)]['instanceState']))
+                                #privateIpInstanceCount += 1
+                                if instanceDetail[str(metadataSearch)]['privateIpAddress'] not in scanIpList and instanceDetail[str(metadataSearch)]['instanceState'] == "RUNNING" and instanceDetail[str(metadataSearch)][str(accountId)] == str(AccountId):
+                                    if args.activateAssets:
+                                        scanIpList.append(str(instanceDetail[str(metadataSearch)]['privateIpAddress']))
+                                        logger.info("Added external IP to list: {0}\n".format(str(instanceDetail[str(metadataSearch)]['privateIpAddress'])))
+                                    elif str(instance['HostAsset']['trackingMethod']) == "QAGENT" and "VM" in str(instance['HostAsset']['agentInfo']['activatedModule']):
+                                        scanIpList.append(str(instanceDetail[str(metadataSearch)]['privateIpAddress']))
+                                        logger.info("Added external IP to list: {0}\n".format(str(instanceDetail[str(metadataSearch)]['privateIpAddress'])))
+                                    else:
+                                        logger.warning("IP Address {0} for Instance ID {1} not activated in VM".format(str(instanceDetail[str(metadataSearch)]['privateIpAddress']),str(instanceDetail[str(metadataSearch)][str(instanceId)])))
+                        else:
+                            if "publicIpAddress" in instanceDetail[str(metadataSearch)]:
+                                logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(instanceDetail[str(metadataSearch)][str(instanceId)],instanceDetail[str(metadataSearch)][accountId],instanceDetail[str(metadataSearch)]['instanceState']))
+                                publicIpInstanceCount += 1
+                                if instanceDetail[str(metadataSearch)]['publicIpAddress'] not in scanIpList and instanceDetail[str(metadataSearch)]['instanceState'] == "RUNNING" and instanceDetail[str(metadataSearch)][str(accountId)] == str(AccountId):
+                                    if args.activateAssets:
+                                        scanIpList.append(str(instanceDetail[str(metadataSearch)]['publicIpAddress']))
+                                        logger.info("Added external IP to list: {0}\n".format(str(instanceDetail[str(metadataSearch)]['publicIpAddress'])))
+                                    elif str(instance['HostAsset']['trackingMethod']) == "QAGENT" and "VM" in str(instance['HostAsset']['agentInfo']['activatedModule']):
+                                        scanIpList.append(str(instanceDetail[str(metadataSearch)]['publicIpAddress']))
+                                        logger.info("Added external IP to list: {0}\n".format(str(instanceDetail[str(metadataSearch)]['publicIpAddress'])))
+                                    else:
+                                        logger.warning("IP Address {0} for Instance ID {1} not activated in VM".format(str(instanceDetail[str(metadataSearch)]['publicIpAddress']),str(instanceDetail[str(metadataSearch)][str(instanceId)])))
 
             if str(jsonHostList['ServiceResponse']['hasMoreRecords']) == 'true':
                 resultsIndex+=100
@@ -389,6 +418,29 @@ def externalPerimeterScan(ipList, accountId, optionProfileId, URL, b64Val):
     logger.info(root[0][2][1][1].text)
     return root[0][2][1][1].text
 
+def internalScan(ipList, accountId, tagId, scannerName, optionProfileId, URL, b64Val):
+    logger.info(ipList)
+
+    headers = {
+        'Accept': '*/*',
+        'content-type': 'application/json',
+        'Authorization': "Basic %s" % b64Val,
+        'X-Requested-With': 'Python Requests'
+    }
+
+    ipList = ipList.replace(" ", "")
+    ipList = ipList.replace("\'", "")
+    logger.info("Fixed ipList {}".format(ipList))
+    rURL = URL + "/api/2.0/fo/scan/?action=launch&target_from=assets&scan_title={0}_{1}_internal_scan&priority=5&option_id={2}&ip={3}&iscanner_name={4}".format(str(accountId), str(tagId), str(optionProfileId), str(ipList), str(scannerName))
+    logger.info(rURL)
+    rdata = requests.post(rURL, headers=headers)
+    logger.info(rdata.status_code)
+    logger.info(rdata.text)
+    root = ET.fromstring(rdata.text)
+    logger.info(root[0][2][1][1].text)
+    return root[0][2][1][1].text
+
+
 def checkScanStatus(runningScansList, URL, headers):
 
     logger.info("Made it to checking scan status")
@@ -502,8 +554,65 @@ def createCsvReport(createReport, csvHeaders, URL, b64Val, exceptionTracking):
         logger.error("Encountered error in requesting scan results - error # {}".format(str(e.errno)))
         logger.error("Encountered error in requesting scan results - error message \n {}".format(str(e.strerror)))
 
+def scanFromCLA(scannerName, tagId, provider, accountId, connectorId, optionProfileId, internal):
+    if provider == "AWS" or provider == "Aws" or provider == "aws":
+        provider == "AWS"
+    elif provider == "AZURE" or provider == "Azure" or provider == "azure":
+        provider == "AZURE"
+    elif provider == "GCP" or provider == "Gcp" or provider == "gcp":
+        provider == "GCP"
+    accountInfoCSV, exceptionTracking, elbLookup, URL, throttle, csvHeaders, pageSize = config()
+    username = os.environ["QUALYS_API_USERNAME"]
+    password = base64.b64decode(os.environ["QUALYS_API_PASSWORD"])
+    usrPass = str(username)+':'+str(password)
+    b64Val = base64.b64encode(str(usrPass).encode('ascii'))
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': "Basic %s" % b64Val,
+        'X-Requested-With': 'Python Requests'
+    }
+    hostList = []
+    runningScansList = []
+    run_connector(connectorId, URL, headers)
+    check_connector_status(connectorId, URL, b64Val)
+    if not tagId:
+        hostList = hostTaggedAssetLookup(accountId, tagId, provider, URL, b64Val, pageSize)
+    else:
+        hostList = hostAssetLookup(accountId, URL, b64Val, pageSize)
+    hostList = dnsLookup(accountId, hostList, elbLookup)
+    addIps = check_ips_in_qualys(hostList, URL, headers)
+    if addIps:
+        addIpsToQualys(addIps, URL, headers)
+    if len(hostList) > 0 and len(hostList) < 1000:
+        if internal:
+            scanRefId = internalScan(str(hostList).strip('[]'), accountId, tagId, scannerName, optionProfileId,URL, b64Val)
+        else:
+            scanRefId = externalPerimeterScan(str(hostList).strip('[]'), accountId, optionProfileId, URL, b64Val)
+    scannedAccounts = []
+    scannedAccounts.append(accountId)
+    runningScansList.append(scanRefId)
+    if args.csvreport:
+        logger.info("Adding scan Ref to list for CSV Report {}".format(scanRefId))
+        createReport[accountId] = str(scanRefId)
+    elif len(hostList) > 1000:
+        logger.critical("Scan hostList {} > than 1000 IPs, you will need to modify script scan more than this amount".format(str(len(hostList))))
+    else:
+        logger.warning("Account {0} returned no targets for Tag {1} for Internal Scan".format(str(accountId), str(tagId)))
 
-def external_scan(scope):
+    while len(runningScansList) != 0:
+        throttleCount, runningScansList = checkScanStatus(runningScansList, URL, headers)
+
+    if args.csvreport:
+        logger.debug("createReport: \n {}".format(str(createReport)))
+        if len(createReport) > 0:
+            createCsvReport(createReport, csvHeaders, URL, b64Val, exceptionTracking)
+        else:
+            logger.warning("No CVS Reports to create, length of createReport k:v pairing for accountID and scanRef == 0")
+
+
+
+def scanFromFile(scope):
     accountInfoCSV, exceptionTracking, elbLookup, URL, throttle, csvHeaders, pageSize = config()
     username = os.environ["QUALYS_API_USERNAME"]
     password = base64.b64decode(os.environ["QUALYS_API_PASSWORD"])
@@ -542,7 +651,10 @@ def external_scan(scope):
                     addIpsToQualys(addIps, URL, headers)
                 if len(hostList) > 0 and len(hostList) < 1000:
                     if row['accountId'] not in scannedAccounts:
-                        scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
+                        if args.internal:
+                            scanRefId = internalScan(str(hostList).strip('[]'), row['accountId'], row['tagId'], str(args.scannerName), row['optionProfileId'],URL, b64Val)
+                        else:
+                            scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
                         scannedAccounts.append(row['accountId'])
                     runningScansList.append(scanRefId)
                     if args.csvreport:
@@ -573,7 +685,10 @@ def external_scan(scope):
                     if addIps:
                         addIpsToQualys(addIps, URL, headers)
                     if len(hostList) > 0 and len(hostList) < 1000:
-                        scanRefId = (externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val))
+                        if args.internal:
+                            scanRefId = internalScan(str(hostList).strip('[]'), row['accountId'], row['tagId'], str(args.scannerName), row['optionProfileId'],URL, b64Val)
+                        else:
+                            scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
                         runningScansList.append(scanRefId)
                         if args.csvreport:
                             logger.info("Adding scan Ref to list for CSV Report {}".format(scanRefId))
@@ -598,7 +713,10 @@ def external_scan(scope):
                         addIpsToQualys(addIps, URL, headers)
                     if len(hostList) > 0 and len(hostList) <= 1000:
                         if row['accountId'] not in scannedAccounts:
-                            scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
+                            if args.internal:
+                                scanRefId = internalScan(str(hostList).strip('[]'), row['accountId'], row['tagId'], str(args.scannerName), row['optionProfileId'],URL, b64Val)
+                            else:
+                                scanRefId = externalPerimeterScan(str(hostList).strip('[]'), row['accountId'], row['optionProfileId'],URL, b64Val)
                             scannedAccounts.append(row['accountId'])
                         if scanRefId not in runningScansList:
                             runningScansList.append(scanRefId)
@@ -625,19 +743,38 @@ def external_scan(scope):
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--scan", "-s", help="Run perimeter scan per account for accounts in specified <scope>: \n python run-perimeter-scan.py -s <scope> or python logging.py --scan <scope> *** Acceptable scope parameters 'allAccounts', BU or accountId listed in cloud-accounts.csv")
+parser.add_argument("--scanFromFile", "-sff", help="Scan from list of cloud accounts listed in file", action="store_true")
 parser.add_argument("--csvreport", "-c", help="Create a CSV report for each accounts perimeter scan", action="store_true")
 parser.add_argument("--exceptiontracking", "-e", help="Process Exception Tracking CSV for creating CSV reports for accounts, used with -c/--csvreport", action="store_true")
-parser.add_argument("--tagScanAws", "-t", help="Process Azure Perimeter Assets", action="store_true")
-parser.add_argument("--activateAssets", "-a", help="Activate all external IPs in scope of accounts in Qualys Vuln Mgmt Module", action="store_true")
+parser.add_argument("--tagScanAws", "-t", help="Process AWS Perimeter Assets with specified Qualys Tag ID", action="store_true")
+parser.add_argument("--activateAssets", "-a", help="Activate all IPs in scope of accounts in Qualys Vuln Mgmt Module", action="store_true")
+parser.add_argument("--internal", "-i", help="Scan Internal IP with designated scannerName", action="store_true")
+parser.add_argument("--scannerName", "-sn", help="ScannerName for Internal/Private IP scans of AWS/aws, AZURE/azure, or GCP/gcp workloads")
+parser.add_argument("--tagId", "-ti", help="**Required if not using --scanFromFile/-sff** Tag ID for command line parameter")
+parser.add_argument("--provider", "-p", help="**Required if not using --scanFromFile/-sff** Specifiy cloud provider AWS, Azure, or GCP for command line parameter")
+parser.add_argument("--accountId", "-ai", help="**Required if not using --scanFromFile/-sff** Specify AWS Account ID, Azure Subscription UUID, or GCP Project ID for command line parameter")
+parser.add_argument("--connectorId", "-ci", help="**Required if not using --scanFromFile/-sff** Specify Qualys Connector ID for command line parameter")
+parser.add_argument("--optionProfileId", "-o", help="**Required if not using --scanFromFile/-sff** Specify Qualys Option Profile ID for command line parameter")
+
 args = parser.parse_args()
-if not args.scan:
+if not args.scan and args.scanFromFile:
     logger.error("Scope is required to run script, please run python run-perimeter-scan.py -h for required command syntax")
     sys.exit(1)
 if args.csvreport:
     if not os.path.exists("reports"):
             os.makedirs("reports")
+if args.internal and not args.scannerName:
+    logger.error("ScannerName is required for internal scan jobs, please re-run with --scannerName={scannerName}")
+    sys.exit(1)
+
+if args.internal and not args.scannerName and not rgs.scanFromFile and not args.connectorId and not args.provider and not args.accountId and not args.optionProfileId:
+    logger.error("Missing command line argument for command line scan, python run-perimeter-scan.py -h for required command syntax")
+    sys.exit(1)
 
 if __name__ == "__main__":
     setup_logging()
     logger = logging.getLogger(__name__)
-    external_scan(args.scan)
+    if not args.scanFromFile:
+        scanFromCLA(str(args.scannerName), str(args.tagId), str(args.provider), str(args.accountId), str(args.connectorId), str(args.optionProfileId), args.internal)
+    else:
+        scanFromFile(args.scan)
