@@ -233,17 +233,21 @@ def hostTaggedAssetLookup(AccountId, tagId, provider, URL, b64Val, pageSize):
                 metadataSearch = 'AzureAssetSourceSimple'
                 instanceId = 'vmId'
                 accountId = 'subscriptionId'
+                state = "state"
             elif str(provider) == 'GCP' or str(provider) == 'gcp':
                 metadataSearch = 'GcpAssetSourceSimple'
                 instanceId = 'instanceId'
                 accountId = 'projectId'
+                state = "state"
             elif str(provider) == 'AWS' or str(provider) == 'aws':
                 metadataSearch = 'Ec2AssetSourceSimple'
                 instanceId = 'instanceId'
                 accountId = 'accountId'
+                state = "instanceState"
             else:
                 logger.error("Provider field map mismatch - return NULL scanIpList")
                 return scanIpList
+
             for instance in assetList:
                 metadataDetails = instance['HostAsset']['sourceInfo']['list']
                 for instanceDetail in metadataDetails:
@@ -252,9 +256,9 @@ def hostTaggedAssetLookup(AccountId, tagId, provider, URL, b64Val, pageSize):
                         #logger.debug("EC2 Asset metadata \n {}".format(str(ec2Detail['Ec2AssetSourceSimple'])))
                         if args.internal == True:
                             if "privateIpAddress" in instanceDetail[str(metadataSearch)]:
-                                logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(instanceDetail[str(metadataSearch)][str(instanceId)],instanceDetail[str(metadataSearch)][accountId],instanceDetail[str(metadataSearch)]['instanceState']))
+                                logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(instanceDetail[str(metadataSearch)][str(instanceId)],instanceDetail[str(metadataSearch)][accountId],instanceDetail[str(metadataSearch)][str(state)]))
                                 #privateIpInstanceCount += 1
-                                if instanceDetail[str(metadataSearch)]['privateIpAddress'] not in scanIpList and instanceDetail[str(metadataSearch)]['instanceState'] == "RUNNING" and instanceDetail[str(metadataSearch)][str(accountId)] == str(AccountId):
+                                if instanceDetail[str(metadataSearch)]['privateIpAddress'] not in scanIpList and instanceDetail[str(metadataSearch)][str(state)] == "RUNNING" and instanceDetail[str(metadataSearch)][str(accountId)] == str(AccountId):
                                     if args.activateAssets:
                                         scanIpList.append(str(instanceDetail[str(metadataSearch)]['privateIpAddress']))
                                         logger.info("Added external IP to list: {0}\n".format(str(instanceDetail[str(metadataSearch)]['privateIpAddress'])))
@@ -265,9 +269,9 @@ def hostTaggedAssetLookup(AccountId, tagId, provider, URL, b64Val, pageSize):
                                         logger.warning("IP Address {0} for Instance ID {1} not activated in VM".format(str(instanceDetail[str(metadataSearch)]['privateIpAddress']),str(instanceDetail[str(metadataSearch)][str(instanceId)])))
                         else:
                             if "publicIpAddress" in instanceDetail[str(metadataSearch)]:
-                                logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(instanceDetail[str(metadataSearch)][str(instanceId)],instanceDetail[str(metadataSearch)][accountId],instanceDetail[str(metadataSearch)]['instanceState']))
+                                logger.info ("Instance Metadata InstanceId: {}  AccountId: {}  instanceState: {}".format(instanceDetail[str(metadataSearch)][str(instanceId)],instanceDetail[str(metadataSearch)][accountId],instanceDetail[str(metadataSearch)][str(state)]))
                                 publicIpInstanceCount += 1
-                                if instanceDetail[str(metadataSearch)]['publicIpAddress'] not in scanIpList and instanceDetail[str(metadataSearch)]['instanceState'] == "RUNNING" and instanceDetail[str(metadataSearch)][str(accountId)] == str(AccountId):
+                                if instanceDetail[str(metadataSearch)]['publicIpAddress'] not in scanIpList and instanceDetail[str(metadataSearch)][str(state)] == "RUNNING" and instanceDetail[str(metadataSearch)][str(accountId)] == str(AccountId):
                                     if args.activateAssets:
                                         scanIpList.append(str(instanceDetail[str(metadataSearch)]['publicIpAddress']))
                                         logger.info("Added external IP to list: {0}\n".format(str(instanceDetail[str(metadataSearch)]['publicIpAddress'])))
