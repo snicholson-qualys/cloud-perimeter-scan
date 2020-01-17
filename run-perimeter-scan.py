@@ -3,29 +3,79 @@
 # Purpose: Run a cloud perimeter scan using Qualys external scanners
 #
 #----------------------------------------------------------
-#  Script logic flow
-#  1 - process a CSV of account info (CSV columns name, accountId, connectorID, BU, optionProfileId).
-#  2 - run the associated connectors for the defined scope
-#  3 - Check for completion of the connector run
-#  4 - Pull list of host assets and external IPs
-#  5 - Pull IP List from Qualys VM Host Assets and compare list of external IPs
-#  6 - Add external IPs not registered in Qualys VM Host Assets
-#  7 - run a scan by IP list
-#  8 - check scan status and fetch scan results when complete
-#  9 - process scan results and lookup in exceptions tracking CSV to create a CSV
-#      for each BU of their detected vulnerabilities
-#  10 - Output CSV Columns: configured in ./config/config.yml in csvHeaders: []
-#       column headers must match Qualys API reponse for call to scans endpoint
+# Script scanFromFile logic flow
+# 1 - process a CSV of account info (CSV columns name, accountId, connectorID, BU, optionProfileId).
+# 2 - run the associated connectors for the defined scope
+# 3 - Check for completion of the connector run
+# 4 - Pull list of host assets and external IPs
+# 5 - Pull IP List from Qualys VM Host Assets and compare list of external IPs
+# 6 - Add external IPs not registered in Qualys VM Host Assets
+# 7 - run a scan by IP list
+# 8 - check scan status and fetch scan results when complete
+# 9 - If csvreport option used, process scan results (lookup in exceptions tracking CSV if --exception options used) to create a CSV Report for the detected vulnerabilities for each AWS Account
+#
+# Script command line parameter logic flow
+# 1 - run the specified connectorId
+# 2 - Check for completion of the connector run
+# 3 - Pull list of host assets and (internal or external) IPs
+# 4 - Pull IP List from Qualys VM Host Assets and compare list of IPs
+# 5 - Add IPs not registered in Qualys VM Host Assets
+# 6 - run a scan by IP list
+# 7 - check scan status and fetch scan results when complete
+# 8 - If csvreport option used, process scan results (lookup in exceptions tracking CSV if --exception option used) to create a CSV Report for the detected vulnerabilities for specified AWS Account
 #----------------------------------------------------------
-# Script Input parameters:
-# --scan allAccounts
-# --scan <BU>
-# --scan <accountId>
+#
+# usage: run-perimeter-scan.py [-h] [--scan SCAN] [--scanFromFile] [--csvreport]
+#                              [--exceptiontracking] [--tagScanAws]
+#                              [--activateAssets] [--internal]
+#                              [--scannerName SCANNERNAME] [--tagId TAGID]
+#                              [--provider PROVIDER] [--accountId ACCOUNTID]
+#                              [--connectorId CONNECTORID]
+#                              [--optionProfileId OPTIONPROFILEID]
+#
+# optional arguments:
+#   -h, --help            show this help message and exit
+#   --scan SCAN, -s SCAN  Run perimeter scan per account for accounts in
+#                         specified <scope>: python run-perimeter-scan.py -s
+#                         <scope> or python logging.py --scan <scope> ***
+#                         Acceptable scope parameters 'allAccounts', BU or
+#                         accountId listed in cloud-accounts.csv
+#   --scanFromFile, -sff  Scan from list of cloud accounts listed in file
+#   --csvreport, -c       Create a CSV report for each accounts perimeter scan
+#   --exceptiontracking, -e
+#                         Process Exception Tracking CSV for creating CSV
+#                         reports for accounts, used with -c/--csvreport
+#   --tagScanAws, -t      Process AWS Perimeter Assets with specified Qualys Tag
+#                         ID
+#   --activateAssets, -a  Activate all IPs in scope of accounts in Qualys Vuln
+#                         Mgmt Module
+#   --internal, -i        Scan Internal IP with designated scannerName
+#   --scannerName SCANNERNAME, -sn SCANNERNAME
+#                         ScannerName for Internal/Private IP scans of AWS/aws,
+#                         AZURE/azure, or GCP/gcp workloads
+#   --tagId TAGID, -ti TAGID
+#                         **Required if not using --scanFromFile/-sff** Tag ID
+#                         for command line parameter
+#   --provider PROVIDER, -p PROVIDER
+#                         **Required if not using --scanFromFile/-sff** Specifiy
+#                         cloud provider AWS, Azure, or GCP for command line
+#                         parameter
+#   --accountId ACCOUNTID, -ai ACCOUNTID
+#                         **Required if not using --scanFromFile/-sff** Specify
+#                         AWS Account ID, Azure Subscription UUID, or GCP
+#                         Project ID for command line parameter
+#   --connectorId CONNECTORID, -ci CONNECTORID
+#                         **Required if not using --scanFromFile/-sff** Specify
+#                         Qualys Connector ID for command line parameter
+#   --optionProfileId OPTIONPROFILEID, -o OPTIONPROFILEID
+#                         **Required if not using --scanFromFile/-sff** Specify
+#                         Qualys Option Profile ID for command line parameter
+#
 #
 #----------------------------------------------------------
-# version: 1.0.1 - date: 9.10.2019
-# version: 1.0.2 - date: 9.17.2019 - added some retry and data validations, additional debug logging, and code performance improvements
-# version  1.0.3 - date: 9.18.2019 - fixed hostasset filter issue and removed some redundant debug logger statements.
+# version: 1.0.1 - date: 09.10.2019
+# version: 1.0.2 - date: 09.17.2019 - added some retry and data validations, additional debug logging, and code performance improvements
+# version  1.0.3 - date: 09.18.2019 - fixed hostasset filter issue and removed some redundant debug logger statements.
 # version  1.0.4 - date: 10.10.2019 - fixed check_ips_in_qualys from passing the wrong headers, and added pagination for assets and IPs
 # version  1.0.5 - date: 10.11.2019 - Add Azure and GCP perimeter scan functionality based on Qualys tagID for cloud asset search publicIpAddress:*
 # version  1.1.0 - date: 01.16.2020 - Added command line run of script with single scan command line Parameters
